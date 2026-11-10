@@ -1,0 +1,540 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline' https://cdn.jsdelivr.net">
+<title>Squeeze — code minify &amp; prettify</title>
+<style>
+:root{--bg:#0e1411;--card:#151d19;--sec:#1e2823;--bd:#2a352f;--fg:#e9eee6;--mut:#8fa096;--pri:#b8f13f;--on:#0e1411;--err:#ff7a70;--r:12px;
+--sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;--mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;color-scheme:dark}
+*{box-sizing:border-box;margin:0}
+html{-webkit-text-size-adjust:100%}
+body{background:var(--bg);color:var(--fg);font:15px/1.5 var(--sans);min-height:100vh}
+button,textarea{font:inherit;color:inherit}
+button{background:none;border:0;cursor:pointer}
+:focus-visible{outline:2px solid var(--pri);outline-offset:2px}
+[hidden]{display:none!important}
+main{max-width:640px;margin:0 auto;padding:24px 16px calc(112px + env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:20px}
+header{display:flex;justify-content:space-between;align-items:baseline}
+h1{font-size:30px;font-weight:700;letter-spacing:-.025em}
+h1 span{color:var(--pri)}
+.tag{font:12px var(--mono);color:var(--mut)}
+.seg{display:flex;gap:4px;padding:4px;background:var(--sec);border-radius:var(--r)}
+.seg button{flex:1;padding:9px;border-radius:8px;font:13.5px var(--mono);color:var(--mut);transition:background .2s,color .2s}
+.seg button[aria-pressed=true]{background:var(--pri);color:var(--on);font-weight:600}
+.panel{border:1px solid var(--bd);border-radius:var(--r);background:var(--card);overflow:hidden;transition:border-color .2s}
+.panel:focus-within{border-color:var(--pri)}
+.bar{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:8px 14px;border-bottom:1px solid var(--bd);font:12px var(--mono);color:var(--mut)}
+.acts{display:flex;gap:16px}
+.bar button{font:inherit;color:var(--mut);padding:2px 0}
+.bar button.hl{color:var(--pri)}
+textarea{display:block;width:100%;background:none;border:0;outline:0;resize:none;padding:14px;font:12.8px/1.55 var(--mono);tab-size:2}
+#src{height:12rem}
+#out{height:18rem;resize:vertical;white-space:pre;overflow:auto}
+.lbl{font:11.5px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--mut);margin-bottom:8px}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{padding:7px 13px;border:1px solid var(--bd);border-radius:99px;font:12.8px var(--mono);color:var(--mut);transition:all .2s}
+.chip[aria-pressed=true]{border-color:var(--pri);color:var(--pri);background:rgba(184,241,63,.1)}
+.chip[aria-pressed=true]::before{content:"✓ "}
+.err{color:var(--err);font:12.8px var(--mono);white-space:pre-wrap;word-break:break-word}
+.err:empty,#note:empty{display:none}
+#note{line-height:1.5}
+.dock{position:fixed;inset:auto 0 0;padding:32px 16px calc(20px + env(safe-area-inset-bottom));background:linear-gradient(to top,var(--bg) 55%,transparent);pointer-events:none}
+.go{pointer-events:auto;display:block;width:100%;max-width:608px;margin:0 auto;padding:16px;border-radius:var(--r);background:var(--pri);color:var(--on);font-size:16.5px;font-weight:700;box-shadow:0 8px 30px -8px rgba(184,241,63,.55);transition:transform .15s,opacity .2s}
+.go:active{transform:scale(.98)}
+.go:disabled{opacity:.4;box-shadow:none;cursor:default}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<main>
+<header><h1>squeeze<span>.</span></h1><span class="tag">minify · prettify</span></header>
+<div class="seg" id="lang" role="group" aria-label="Language">
+<button type="button" data-v="js" aria-pressed="true">JS</button><button type="button" data-v="css" aria-pressed="false">CSS</button><button type="button" data-v="html" aria-pressed="false">HTML</button><button type="button" data-v="json" aria-pressed="false">JSON</button>
+</div>
+<section class="panel">
+<div class="bar"><span id="inInfo">input</span><div class="acts"><button type="button" id="paste" class="hl">Paste</button><button type="button" id="clear">Clear</button></div></div>
+<textarea id="src" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" aria-label="Input code"></textarea>
+</section>
+<div class="seg" id="op" role="group" aria-label="Operation">
+<button type="button" data-v="pretty" aria-pressed="true">Prettify</button><button type="button" data-v="minify" aria-pressed="false">Minify</button>
+</div>
+<section aria-label="Cleanup options"><p class="lbl">Cleanup options</p><div class="chips" id="chips"></div></section>
+<p class="err" id="err" role="alert"></p>
+<p class="tag" id="note" aria-live="polite"></p>
+<section class="panel" id="res" hidden>
+<div class="bar"><span id="stat" aria-live="polite"></span><div class="acts"><button type="button" id="copy" class="hl">Copy</button></div></div>
+<textarea id="out" readonly spellcheck="false" aria-label="Result"></textarea>
+</section>
+</main>
+<div class="dock"><button type="button" class="go" id="run" disabled>Prettify →</button></div>
+<script>
+(()=>{
+'use strict';
+/*CORE*/
+// ───────── JavaScript ─────────
+const KW=new Set(['return','typeof','instanceof','in','of','new','delete','void','throw','case','do','else','yield','await']);
+const CTRL=new Set([...KW,'if','for','while','switch','catch','with']);
+const OBJW=new Set(['return','yield','await','in','of','typeof','void','delete','case','default']);
+const RE_WS=/\s+/y,RE_W=/[\w$\u0080-\uffff]+/y,RE_F=/[a-z]*/y;
+const RE_N=/(?:0[xXoObB][\da-fA-F_]+n?|(?:\d[\d_]*\.?[\d_]*|\.\d[\d_]*)(?:[eE][+-]?\d+)?n?)/y;
+const RE_P=/>>>=|\.\.\.|===|!==|\*\*=|<<=|>>=|>>>|&&=|\|\|=|\?\?=|=>|==|!=|<=|>=|&&|\|\||\?\?|\?\.(?!\d)|\+\+|--|\+=|-=|\*=|\/=|%=|&=|\|=|\^=|<<|>>|\*\*|[\s\S]/y;
+
+function skipStr(s,i){const q=s[i];let j=i+1;while(j<s.length&&s[j]!==q&&s[j]!=='\n'){if(s[j]==='\\')j++;j++}return s[j]===q?j+1:Math.min(j,s.length)}
+function skipTpl(s,i){let j=i+1;while(j<s.length){const c=s[j];if(c==='\\')j+=2;else if(c==='`')return j+1;else if(c==='$'&&s[j+1]==='{')j=skipExpr(s,j+2);else j++}return s.length}
+function skipExpr(s,j){let d=1;while(j<s.length){const c=s[j];if(c==='{')d++;else if(c==='}'&&--d===0)return j+1;else if(c==='"'||c==="'"){j=skipStr(s,j);continue}else if(c==='`'){j=skipTpl(s,j);continue}j++}return s.length}
+function scanRegex(s,i){let cls=false;for(let j=i+1;j<s.length;j++){const c=s[j];if(c==='\n')return null;if(c==='\\')j++;else if(c==='[')cls=true;else if(c===']')cls=false;else if(c==='/'&&!cls){RE_F.lastIndex=j+1;RE_F.exec(s);return s.slice(i,RE_F.lastIndex)}}return null}
+const reOK=p=>!p||(p.t==='p'&&!/^(\)|\]|\}|\+\+|--)$/.test(p.v))||(p.t==='w'&&KW.has(p.v));
+
+function tokJS(s){
+  const T=[],n=s.length;let i=0,prev=null;
+  const rx=re=>{re.lastIndex=i;const m=re.exec(s);return m&&m[0]};
+  const add=(t,v)=>{const k={t,v};T.push(k);if(t!=='ws'&&t!=='com')prev=k;i+=v.length};
+  while(i<n){
+    const c=s[i],d=s[i+1];let v;
+    if((v=rx(RE_WS)))add('ws',v);
+    else if(c==='/'&&d==='/'){const j=s.indexOf('\n',i);add('com',s.slice(i,j<0?n:j))}
+    else if(c==='/'&&d==='*'){const j=s.indexOf('*/',i+2);add('com',s.slice(i,j<0?n:j+2))}
+    else if(c==='"'||c==="'")add('str',s.slice(i,skipStr(s,i)));
+    else if(c==='`')add('tpl',s.slice(i,skipTpl(s,i)));
+    else if(c==='/'&&reOK(prev)&&(v=scanRegex(s,i)))add('re',v);
+    else if((/\d/.test(c)||(c==='.'&&/\d/.test(d)))&&(v=rx(RE_N)))add('w',v);
+    else if((v=rx(RE_W)))add('w',v);
+    else add('p',rx(RE_P));
+  }
+  return T;
+}
+const nlCount=v=>(v.match(/\n/g)||[]).length;
+
+// Significant tokens with newline/space info, comment filtering, console removal and spacing flags
+function prep(src,o){
+  const S=[];let nl=0,sp=false;
+  for(const k of tokJS(src)){
+    if(k.t==='ws'){nl+=nlCount(k.v);sp=true;continue}
+    if(k.t==='com'&&o.comments&&!(o.license&&/^\/\*!|@license|@preserve/.test(k.v))){nl+=nlCount(k.v);sp=true;continue}
+    k.nl=nl;k.sp=sp;nl=0;sp=false;S.push(k);
+  }
+  if(o.console)dropConsole(S);
+  flag(S);
+  return S;
+}
+function dropConsole(S){
+  for(let i=0;i<S.length;i++){
+    const k=S[i],pv=S[i-1];
+    if(!(k.t==='w'&&k.v==='console'&&S[i+1]?.v==='.'&&S[i+2]?.t==='w'&&S[i+3]?.v==='('))continue;
+    if(pv&&pv.t==='p'&&pv.v==='.')continue;
+    let j=i+4,d=1;
+    while(j<S.length&&d){if(S[j].t==='p'){const v=S[j].v;if(v==='('||v==='['||v==='{')d++;else if(v===')'||v===']'||v==='}')d--}j++}
+    if(d)continue;
+    if(!pv||(pv.t==='p'&&/^[;{}]$/.test(pv.v))){      // statement: remove entirely
+      if(S[j]&&S[j].t==='p'&&S[j].v===';')j++;
+      S.splice(i,j-i);
+      if(S[i]){S[i].nl+=k.nl;S[i].sp=true}
+      i--;
+    }else{                                          // expression: keep semantics with `void 0`
+      S.splice(i,j-i,{t:'w',v:'void',nl:k.nl,sp:k.sp},{t:'w',v:'0',nl:0,sp:true});i++;
+    }
+  }
+}
+function flag(S){
+  const cn=[0];let p=null;
+  for(const k of S){
+    if(k.t==='com')continue;
+    if(k.t==='p'){
+      const v=k.v;
+      if(v==='+'||v==='-'||v==='++'||v==='--'){
+        const operand=p&&((p.t==='p'&&(p.v===')'||p.v===']'))||(p.t!=='p'&&!(p.t==='w'&&KW.has(p.v))));
+        k.u=!operand;
+      }
+      if(v==='{')k.obj=!!p&&(p.t==='p'?!/^[{});]$|^=>$/.test(p.v):OBJW.has(p.v));
+      if(v==='('||v==='['||v==='{')cn.push(0);
+      else if(v===')'||v===']'||v==='}'){if(cn.length>1)cn.pop()}
+      else if(v==='?')cn[cn.length-1]++;
+      else if(v===':'&&cn[cn.length-1]>0){cn[cn.length-1]--;k.tern=true}
+    }
+    p=k;
+  }
+}
+// A newline may be dropped only when the parse is identical without it (no ASI hazard)
+const NOCONT=new Set(['}',')',']','++','--']);
+const dropNL=(a,b)=>!a||(a.t==='p'&&!NOCONT.has(a.v))||(b.t==='p'&&!/^(\{|\+\+|--|!|~|#|@)$/.test(b.v));
+const sep=(a,b)=>{
+  const A=a.t,B=b.t;
+  if((A==='w'||A==='re')&&B==='w')return true;
+  if(A==='w'&&/^\d+$/.test(a.v)&&B==='p'&&b.v==='.')return true;
+  if(A==='p'&&B==='p'){const x=a.v.slice(-1),y=b.v[0];if((x==='+'||x==='-')&&x===y)return true;if(x==='/'&&(y==='/'||y==='*'))return true}
+  return A==='p'&&a.v==='/'&&B==='re';
+};
+function minJS(src,o){
+  let out='',p=null;
+  for(const k of prep(src,o)){
+    if(k.t==='com'){
+      if(k.v[1]==='/'||k.nl||!out){out+=(out&&!out.endsWith('\n')?'\n':'')+k.v+'\n';p=null}
+      else out+=(k.sp?' ':'')+k.v;
+      continue;
+    }
+    if(p&&k.sp){if(k.nl&&!dropNL(p,k))out+='\n';else if(sep(p,k))out+=' '}
+    out+=k.v;p=k;
+  }
+  return out.trim();
+}
+const NOSP_BEFORE=/^(,|;|\)|\]|\.|\?\.)$/,NOSP_AFTER=/^(\(|\[|\.|\?\.|!|~|#|\.\.\.)$/;
+function gap(p,k){
+  if(!p)return false;
+  if(k.t==='p'&&NOSP_BEFORE.test(k.v))return false;
+  if(p.t==='p'){
+    if(NOSP_AFTER.test(p.v)||p.u)return false;
+    if(p.v===')'||p.v===']')return !(k.t==='p'&&(k.v==='('||k.v==='['));
+    if(p.v==='}')return !(k.t==='p'&&k.v==='(');
+    return true;
+  }
+  if(k.t==='p'){
+    if(k.v==='('||k.v==='[')return p.t==='w'&&CTRL.has(p.v);
+    if(k.v==='++'||k.v==='--')return !!k.u;
+    return true;
+  }
+  if(k.t==='tpl')return p.t==='w'&&KW.has(p.v);
+  return true;
+}
+const stay=n=>!!n&&((n.t==='p'&&/^(\)|\]|,|;|\.|\?\.|:|\?)$/.test(n.v))||(n.t==='w'&&/^(else|catch|finally|while)$/.test(n.v)));
+function prettyJS(src,o){
+  const S=prep(src,o),out=[],st=[];let ln='',ld=0,d=0,p=null;
+  const top=()=>st[st.length-1];
+  const add=(v,k)=>{
+    if(!ln){ld=d;if(k.nl>1&&!o.blank&&out.length&&out[out.length-1]!==''&&!/\{$/.test(out[out.length-1])&&v!=='}')out.push('')}
+    ln+=v;
+  };
+  const flush=()=>{if(ln){out.push('  '.repeat(ld)+ln);ln=''}};
+  for(let i=0;i<S.length;i++){
+    const k=S[i],nx=S[i+1],v=k.v,P=k.t==='p';
+    const brk=()=>{const n=S[i+1];if(!(n&&n.t==='com'&&n.nl===0))flush()};
+    if(k.t==='com'){
+      const own=!ln||k.nl>0;
+      if(ln&&own)flush();else if(ln)ln+=' ';
+      add(v,k);
+      if(own||v[1]==='/'||(p&&p.v===';'))flush();
+      continue;
+    }
+    if(ln&&k.nl&&!dropNL(p,k))flush();
+    const sp=()=>{if(ln&&gap(p,k))ln+=' '};
+    if(P&&v==='{'){
+      sp();
+      if(nx&&nx.t==='p'&&nx.v==='}'){add('{}',k);i++;p=nx;if(!stay(S[i+1]))brk();continue}
+      add('{',k);flush();d++;st.push(k.obj?'o':'b');
+    }else if(P&&v==='}'){
+      flush();d=Math.max(0,d-1);st.pop();add('}',k);if(!stay(nx))brk();
+    }else if(P&&(v==='('||v==='[')){sp();add(v,k);st.push('p')}
+    else if(P&&(v===')'||v===']')){sp();add(v,k);st.pop()}
+    else if(P&&v===';'){add(v,k);if(top()!=='p')brk()}
+    else if(P&&v===','){add(v,k);if(top()==='o')brk()}
+    else if(P&&v===':'){if(k.tern&&ln)ln+=' ';add(v,k);if(!k.tern&&top()==='b')brk()}
+    else{sp();add(v,k)}
+    p=k;
+  }
+  flush();
+  return out.join('\n');
+}
+
+// ───────── CSS ─────────
+function cssTok(s){
+  const T=[],n=s.length;let i=0;
+  while(i<n){
+    const c=s[i];let j=i+1,t='x';
+    if(c==='"'||c==="'"){t='s';while(j<n&&s[j]!==c){if(s[j]==='\\')j++;j++}j=Math.min(j+1,n)}
+    else if(c==='/'&&s[i+1]==='*'){t='c';j=s.indexOf('*/',i+2);j=j<0?n:j+2}
+    else if(c==='\\')j=Math.min(i+2,n);
+    else if(/\s/.test(c)){t='w';while(j<n&&/\s/.test(s[j]))j++}
+    T.push({t,v:s.slice(i,j)});i=j;
+  }
+  return T;
+}
+const keepC=(v,o)=>!o.comments||(o.license&&/^\/\*[!@]/.test(v));
+function minCSS(s,o){
+  let out='',par=0,sp=false;
+  for(const k of cssTok(s)){
+    if(k.t==='w'){sp=true;continue}
+    if(k.t==='c'){if(keepC(k.v,o)){out+=k.v;sp=false}else sp=true;continue}
+    const c=k.v,l=out[out.length-1];
+    if(sp&&out){
+      const drop=/[{};,>~:(]/.test(l)||(k.t==='x'&&/^[{};,>~!)]/.test(c))||(par===0&&(l==='+'||c==='+'));
+      if(!drop)out+=' ';
+    }
+    sp=false;
+    if(k.t==='x'){if(c==='(')par++;else if(c===')')par=Math.max(0,par-1);else if(c==='}'&&out.endsWith(';'))out=out.slice(0,-1)}
+    out+=c;
+  }
+  return out.trim();
+}
+function prettyCSS(s,o){
+  const out=[];let cur='',d=0,par=0,uP=0,sp=false;
+  const I=()=>'  '.repeat(d);
+  const decl=t=>t.replace(/^(-{0,2}[\w-]+)\s*:\s*/,'$1: ').replace(/\s*!\s*important$/i,' !important');
+  const sels=t=>{const a=[];let b='',p=0,q='';for(const c of t){if(q){b+=c;if(c===q)q='';continue}if(c==='"'||c==="'"){q=c;b+=c;continue}if(c==='('||c==='[')p++;else if(c===')'||c===']')p--;if(c===','&&p<1){a.push(b.trim());b=''}else b+=c}a.push(b.trim());return a.join(',\n'+I())};
+  for(const k of cssTok(s)){
+    if(k.t==='w'){sp=true;continue}
+    if(k.t==='c'){
+      if(!keepC(k.v,o)){sp=true;continue}
+      if(cur.trim())cur+=(sp?' ':'')+k.v;else out.push(I()+k.v);
+      sp=false;continue;
+    }
+    const c=k.v,x=k.t==='x';
+    if(sp&&cur&&!/\s$|\($/.test(cur)&&!(x&&(c===','||c===')')))cur+=' ';
+    sp=false;
+    if(x&&c==='{'){const t=cur.trim();out.push(I()+(t[0]==='@'?t:sels(cur))+' {');cur='';d++}
+    else if(x&&c==='}'){const t=cur.trim();if(t)out.push(I()+decl(t)+';');cur='';d=Math.max(0,d-1);out.push(I()+'}');if(d===0&&!o.blank)out.push('')}
+    else if(x&&c===';'&&par===0){const t=cur.trim();if(t)out.push(I()+decl(t)+';');cur=''}
+    else if(x&&c===','){cur=cur.trimEnd()+(uP?',':', ')}
+    else{
+      if(x&&c==='('){par++;if(/url$/i.test(cur))uP=par}
+      else if(x&&c===')'){if(par===uP)uP=0;par=Math.max(0,par-1)}
+      cur+=c;
+    }
+  }
+  if(cur.trim())out.push(I()+cur.trim());
+  return out.join('\n').trim();
+}
+
+// ───────── HTML ─────────
+const BLOCK=/^(address|article|aside|audio|base|blockquote|body|br|canvas|caption|col|colgroup|dd|details|dialog|div|dl|dt|fieldset|figcaption|figure|footer|form|h[1-6]|head|header|hgroup|hr|html|iframe|li|link|main|menu|meta|nav|noscript|ol|optgroup|option|p|pre|script|section|select|source|style|summary|table|tbody|td|template|tfoot|th|thead|title|tr|track|ul|video)$/;
+const VOID=/^(area|base|br|col|embed|hr|img|input|link|meta|param|source|track|wbr)$/;
+const HT=/<!--[\s\S]*?-->|<!\[CDATA\[[\s\S]*?\]\]>|<(script|style|pre|textarea)\b(?:"[^"]*"|'[^']*'|[^'">])*>[\s\S]*?<\/\1\s*>|<(?:"[^"]*"|'[^']*'|[^'">])*>|<|[^<]+/gi;
+function htokens(s){
+  return (s.match(HT)||[]).map(t=>{
+    if(t.startsWith('<!--'))return{t,k:'com'};
+    const m=t.length>1&&/^<(\/?)([a-zA-Z][\w:-]*)/.exec(t);
+    if(!m)return{t,k:t[0]==='<'&&t.length>1?'misc':'txt'};
+    const nm=m[2].toLowerCase(),raw=!m[1]&&/^(script|style|pre|textarea)$/.test(nm)&&/<\/\w+\s*>$/.test(t);
+    return{t,nm,k:raw?'raw':m[1]?'close':'open',blk:BLOCK.test(nm),vd:VOID.test(nm)||/\/>$/.test(t)};
+  });
+}
+const COND=/^<!--\s*\[if|^<!--\s*<!\[/i;
+const dropCom=(t,o)=>o.comments&&!COND.test(t.t);
+const tagFix=t=>t.replace(/("[^"]*"|'[^']*')|\s+/g,(m,q)=>q||' ').replace(/ >$/,'>');
+function splitRaw(t){
+  const open=/^<(?:"[^"]*"|'[^']*'|[^'">])*>/.exec(t)[0],close=/<\/\w+\s*>$/.exec(t)[0];
+  return{open,close,inner:t.slice(open.length,t.length-close.length)};
+}
+function inlineCode(tok,mode,o){
+  const r=splitRaw(tok.t),ty=(/\btype\s*=\s*["']?([^"'\s>]+)/i.exec(r.open)||[])[1];
+  const jo={comments:o.comments,license:true,blank:true,console:false};
+  try{
+    if(tok.nm==='script'&&(!ty||/javascript|module|ecmascript/i.test(ty)))r.inner=mode==='min'?minJS(r.inner,jo):prettyJS(r.inner,jo);
+    else if(tok.nm==='style'&&(!ty||/text\/css/i.test(ty)))r.inner=mode==='min'?minCSS(r.inner,jo):prettyCSS(r.inner,jo);
+    else r.inner=r.inner.trim();
+  }catch(e){r.inner=r.inner.trim()}
+  return r;
+}
+function minHTML(s,o){
+  const L=[];
+  for(const tok of htokens(s)){
+    if(tok.k==='com'&&dropCom(tok,o))continue;
+    if(tok.k==='txt'){
+      const t=tok.t.replace(/\s+/g,' '),last=L[L.length-1];
+      if(last&&last.k==='txt')last.t+=t;else L.push({k:'txt',t});
+      continue;
+    }
+    if(tok.k==='raw'&&tok.nm!=='pre'&&tok.nm!=='textarea'){const r=inlineCode(tok,'min',o);tok.t=r.open+r.inner+r.close}
+    else if(tok.k==='open'||tok.k==='close'||tok.k==='misc')tok.t=tagFix(tok.t);
+    L.push(tok);
+  }
+  const edge=x=>!x||x.blk||x.k==='misc'||x.k==='com';
+  return L.map((x,i)=>{
+    if(x.k!=='txt')return x.t;
+    let t=x.t;
+    if(edge(L[i-1]))t=t.trimStart();
+    if(edge(L[i+1]))t=t.trimEnd();
+    return t;
+  }).join('').trim();
+}
+function prettyHTML(s,o){
+  const T=htokens(s),out=[];let ln='',d=0;
+  const ind=()=>'  '.repeat(d);
+  const flush=()=>{if(ln.trim())out.push(ind()+ln.trim());ln=''};
+  const push=t=>{flush();out.push(ind()+t)};
+  for(let i=0;i<T.length;i++){
+    const tok=T[i];
+    if(tok.k==='com'){if(!dropCom(tok,o))push(tok.t.trim());continue}
+    if(tok.k==='misc'){push(tok.t);continue}
+    if(tok.k==='txt'){ln+=tok.t.replace(/\s+/g,' ');continue}
+    if(tok.k==='raw'){
+      if(tok.nm==='textarea'){ln+=tok.t;continue}
+      if(tok.nm==='pre'){push(tok.t);continue}
+      const r=inlineCode(tok,'pretty',o);
+      flush();
+      if(!r.inner)out.push(ind()+r.open+r.close);
+      else{out.push(ind()+r.open);for(const l of r.inner.split('\n'))out.push(l?ind()+'  '+l:'');out.push(ind()+r.close)}
+      continue;
+    }
+    const tag=tagFix(tok.t);
+    if(!tok.blk){ln+=tag;continue}
+    if(tok.k==='close'){flush();d=Math.max(0,d-1);out.push(ind()+tag);continue}
+    if(!tok.vd){                                   // <li>short inline content</li> stays on one line
+      let j=i+1;
+      while(j<T.length&&(T[j].k==='txt'||(T[j].blk===false&&T[j].k!=='com'&&T[j].k!=='misc')))j++;
+      if(T[j]&&T[j].k==='close'&&T[j].nm===tok.nm){
+        const body=T.slice(i+1,j).map(x=>x.k==='txt'?x.t.replace(/\s+/g,' '):x.k==='raw'?x.t:tagFix(x.t)).join('').trim();
+        if(body.length<100){push(tag+body+tagFix(T[j].t));i=j;continue}
+      }
+    }
+    push(tag);
+    if(!tok.vd)d++;
+  }
+  flush();
+  return out.join('\n');
+}
+
+// ───────── Dispatcher & detection ─────────
+function transform(src,lang,op,o){
+  src=src.replace(/^\uFEFF/,'').replace(/\r\n?/g,'\n');
+  const min=op==='minify';
+  if(lang==='json')return JSON.stringify(JSON.parse(src),null,min?0:2);
+  if(lang==='css')return min?minCSS(src,o):prettyCSS(src,o);
+  if(lang==='html')return min?minHTML(src,o):prettyHTML(src,o);
+  return min?minJS(src,o):prettyJS(src,o);
+}
+function detect(s){
+  const t=s.trim();
+  if(!t)return null;
+  if(/^[{[]/.test(t)){try{JSON.parse(t);return 'json'}catch(e){}}
+  if(/^<(!doctype|[a-z!])/i.test(t))return 'html';
+  if(/^@(import|media|charset|font-face|keyframes|layer|supports|namespace|page|property)\b/.test(t))return 'css';
+  if(/^[^{}=;]*\{\s*[\w-]+\s*:[^{}]*\}/.test(t)&&!/\b(function|const|let|var|return|if|for|while|else|class|switch|try)\b|=>/.test(t.slice(0,200)))return 'css';
+  return 'js';
+}
+/*END*/
+
+// ───────── UI ─────────
+const $=s=>document.querySelector(s);
+const el={src:$('#src'),out:$('#out'),res:$('#res'),err:$('#err'),run:$('#run'),stat:$('#stat'),chips:$('#chips'),copy:$('#copy'),info:$('#inInfo'),note:$('#note')};
+const st={lang:'js',op:'pretty',manual:false,ran:false};
+const opts={comments:true,license:true,console:false,single:false,nosemi:false,tabs:false,wide:false};
+const CH={comments:'Remove comments',license:'Keep /*! license */',console:'Remove console.*',single:'Single quotes',nosemi:'No semicolons',tabs:'Use tabs',wide:'100 columns'};
+const SETS={
+  pretty:{js:['single','nosemi','tabs','wide'],css:['single','tabs','wide'],html:['single','tabs','wide'],json:['tabs','wide']},
+  minify:{js:['comments','license','console'],css:['comments','license'],html:['comments'],json:[]}
+};
+const HINT={js:'// Paste your JavaScript here',css:'/* Paste your CSS here */',html:'<!-- Paste your HTML here -->',json:'{ "paste": "your JSON here" }'};
+const bytes=s=>new TextEncoder().encode(s).length;
+const fmtB=n=>n<1024?n+' B':(n/1024).toFixed(1)+' KB';
+
+function renderChips(){
+  el.chips.textContent='';
+  const set=SETS[st.op==='pretty'?'pretty':'minify'][st.lang];
+  if(!set.length){const s=document.createElement('span');s.className='tag';s.textContent='No options for this mode.';el.chips.append(s);return}
+  for(const k of set){const label=CH[k];
+    const b=document.createElement('button');
+    b.type='button';b.className='chip';b.dataset.k=k;b.textContent=label;b.setAttribute('aria-pressed',String(opts[k]));
+    el.chips.append(b);
+  }
+}
+function syncSeg(id,v){$(id).querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.v===v)))}
+function update(){
+  const v=el.src.value;
+  el.run.disabled=!v.trim();
+  el.run.textContent=(st.op==='pretty'?'Prettify':'Minify')+' →';
+  el.info.textContent=v?'input · '+fmtB(bytes(v)):'input';
+}
+// Prettier (official standalone build) is loaded lazily from jsDelivr on first use
+const PV='3.4.2',CDN='https://cdn.jsdelivr.net/npm/prettier@'+PV+'/';
+let pLoad=null;
+const loadScript=u=>new Promise((ok,no)=>{
+  const s=document.createElement('script');
+  s.src=u;s.async=false;s.onload=ok;
+  s.onerror=()=>{const e=new Error('Could not load '+u);e.loadFailed=true;no(e)};
+  document.head.append(s);
+});
+function loadPrettier(){
+  if(!pLoad)pLoad=(async()=>{
+    await loadScript(CDN+'standalone.js');
+    await Promise.all(['babel','estree','postcss','html'].map(n=>loadScript(CDN+'plugins/'+n+'.js')));
+    if(!window.prettier||!window.prettierPlugins){const e=new Error('Prettier did not initialize');e.loadFailed=true;throw e}
+  })().catch(e=>{pLoad=null;throw e});
+  return pLoad;
+}
+async function prettierFormat(code,lang){
+  await loadPrettier();
+  const P=window.prettierPlugins;
+  return window.prettier.format(code.replace(/\r\n?/g,'\n'),{
+    parser:{js:'babel',css:'css',html:'html',json:'json'}[lang],
+    plugins:[P.babel,P.estree,P.postcss,P.html],
+    printWidth:opts.wide?100:80,useTabs:opts.tabs,semi:!opts.nosemi,singleQuote:opts.single
+  });
+}
+let job=0;
+async function process(){
+  const code=el.src.value;
+  if(!code.trim())return;
+  const id=++job;let engine='';
+  el.err.textContent='';el.note.textContent='';
+  try{
+    let r;
+    if(st.op==='pretty'){
+      el.run.disabled=true;el.run.textContent='Formatting…';
+      try{r=await prettierFormat(code,st.lang);engine='Prettier '+PV}
+      catch(e){
+        if(!e.loadFailed)throw e;
+        r=transform(code,st.lang,'pretty',{comments:false,license:true,blank:false,console:false});
+        engine='built-in formatter';
+        if(id===job)el.note.textContent='Prettier could not be loaded (offline or blocked), so the built-in formatter was used.';
+      }
+    }else r=transform(code,st.lang,'minify',opts);
+    if(id!==job)return;
+    const a=bytes(code),b=bytes(r),pct=a?Math.round((b-a)/a*100):0;
+    el.out.value=r;el.res.hidden=false;st.ran=true;
+    el.stat.textContent=fmtB(a)+' → '+fmtB(b)+' ('+(pct>0?'+':pct<0?'−':'')+Math.abs(pct)+'%)'+(engine?' · '+engine:'');
+  }catch(e){
+    if(id!==job)return;
+    el.err.textContent='Could not process: '+(e&&e.message||e);el.res.hidden=true;
+  }finally{
+    if(id===job)update();
+  }
+}
+const rerun=()=>{if(st.ran&&el.src.value.trim())process()};
+function setLang(v,manual){
+  st.lang=v;if(manual)st.manual=true;
+  syncSeg('#lang',v);el.src.placeholder=HINT[v];renderChips();rerun();
+}
+function autoDetect(){
+  if(st.manual)return;
+  const d=detect(el.src.value);
+  if(d&&d!==st.lang)setLang(d,false);
+}
+function onSeg(id,fn){
+  $(id).addEventListener('click',e=>{const b=e.target.closest('button[data-v]');if(b)fn(b.dataset.v)});
+}
+onSeg('#lang',v=>setLang(v,true));
+onSeg('#op',v=>{st.op=v;syncSeg('#op',v);update();renderChips();rerun()});
+el.chips.addEventListener('click',e=>{
+  const b=e.target.closest('button[data-k]');if(!b)return;
+  const k=b.dataset.k;opts[k]=!opts[k];b.setAttribute('aria-pressed',String(opts[k]));rerun();
+});
+el.src.addEventListener('input',update);
+el.src.addEventListener('paste',()=>setTimeout(()=>{update();autoDetect()}));
+el.src.addEventListener('keydown',e=>{if((e.metaKey||e.ctrlKey)&&e.key==='Enter'){e.preventDefault();if(!el.run.disabled)process()}});
+el.run.addEventListener('click',process);
+$('#clear').addEventListener('click',()=>{
+  el.src.value='';el.out.value='';el.res.hidden=true;el.err.textContent='';st.ran=false;st.manual=false;update();el.src.focus();
+});
+$('#paste').addEventListener('click',async()=>{
+  try{
+    el.src.value=await navigator.clipboard.readText();update();autoDetect();el.src.focus();el.err.textContent='';
+  }catch(e){
+    el.src.focus();el.err.textContent='Clipboard access is blocked. Use ⌘V or Ctrl+V to paste.';
+  }
+});
+let copyTimer=0;
+el.copy.addEventListener('click',async()=>{
+  let ok=true;
+  try{await navigator.clipboard.writeText(el.out.value)}
+  catch(e){el.out.select();try{ok=document.execCommand('copy')}catch(_){ok=false}}
+  el.copy.textContent=ok?'Copied ✓':'Press ⌘C / Ctrl+C';
+  clearTimeout(copyTimer);copyTimer=setTimeout(()=>{el.copy.textContent='Copy'},1600);
+});
+el.src.placeholder=HINT.js;
+renderChips();update();
+})();
+</script>
+</body>
+</html>
